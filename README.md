@@ -1,16 +1,39 @@
 # Atoms to Cities
 
-A music-driven particle universe. Particles start as atoms, then form shapes, galaxies, a universe of filaments, civilizations on a planet, and finally cities. The music sets the pace: louder, sustained sound moves the story forward faster.
+A music-driven journey. It starts with particles, builds atoms, shapes, galaxies and a universe, then grows life, creatures and a planet. The camera drops to the ground, through an ocean, a volcano and a forest, and ends on a downtown street, looking up at the towers.
+
+The song sets the pace. The whole journey spans the length of the track, and loud, sustained passages move the story faster than quiet ones.
 
 ## Listen
 
-Open the GitHub Pages site, pick a built-in track, or drop your own MP3 anywhere on the page. Audio analysis runs in your browser, and your files are never uploaded.
+Open the GitHub Pages site, pick a built-in track, or drop your own MP3 anywhere on the page. Audio analysis runs in your browser. Your files are never uploaded.
+
+Controls: Space plays and pauses, the left and right arrow keys skip 5 seconds, and clicking the progress bar seeks.
+
+## The journey
+
+| # | Scene | What happens |
+|---|-------|--------------|
+| 1 | Atoms | Electron shells orbit nuclei |
+| 2 | Shapes | Particles resolve into nested polyhedra |
+| 3 | Galaxies | Spiral arms turn, with bass driving the spin |
+| 4 | Universe | Galaxies gather along filaments |
+| 5 | Life | Cells, membranes and nuclei |
+| 6 | Creatures | Jellyfish pulse and drift |
+| 7 | Earth | A planet with continents, oceans and clouds |
+| 8 | Ocean | A coastline, waves and glinting water |
+| 9 | Volcano | Lava rivers, a crater and an ash plume |
+| 10 | Forest | Trees along a footpath, with drifting pollen |
+| 11 | Downtown | A street canyon of lit towers, with traffic |
+
+The ground scenes combine real geometry with a particle layer: waves and glints on the water, embers and ash from the volcano, pollen and fireflies in the forest, and traffic and stars in the city.
 
 ## How it works
 
-- **Energy:** the loudness of the playing audio fills a meter. Quiet passages slow the progression, and a small base rate keeps it moving.
-- **Stages:** Atoms, Shapes, Galaxies, The Universe, Civilizations, Cities. Each stage is a target layout that the same particles morph into.
-- **Beats:** bass hits push the particles outward, and high frequencies make them shimmer.
+- **Pacing:** loudness is measured as RMS in decibels. Its ratio to the track's running average sets the speed, so the story always reaches its end.
+- **Particles:** each particle springs toward its target position in each scene, with per-kind motion in the vertex shader.
+- **Geometry:** terrain, water, trees and buildings are triangle meshes. City windows are lit by a procedural shader.
+- **Camera:** each scene has its own path, which the story moves along, and the camera eases between them.
 
 ## Run locally
 
@@ -20,7 +43,7 @@ Any static server works. For example:
 python3 -m http.server 8000
 ```
 
-Then open http://localhost:8000. Add `#stage=3` to the address to jump straight to a stage.
+Then open http://localhost:8000. To jump to a scene, add a hash such as `#scene=9&u=0.5`, where `u` is the position within the scene. Add `?n=60000` to lower the particle count on slower machines.
 
 ## Music credits
 
