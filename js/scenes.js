@@ -17,6 +17,12 @@ export class Builder {
     this.size = new Float32Array(N);
     this.kind = new Float32Array(N);
     this.anchor = new Float32Array(N * 3);
+    this.axis = new Float32Array(N * 3);
+  }
+  // Sets the orbit axis for the particle just added.
+  setAxis(x, y, z) {
+    const k = (this.n - 1) * 3;
+    this.axis[k] = x; this.axis[k + 1] = y; this.axis[k + 2] = z;
   }
   get full() { return this.n >= this.N; }
   add(x, y, z, r, g, b, s, kind = 0, ax = 0, ay = 0, az = 0) {
@@ -30,7 +36,7 @@ export class Builder {
   }
   finish() {
     for (let i = this.n; i < this.N; i++) this.size[i] = 0;
-    return { pos: this.pos, col: this.col, size: this.size, kind: this.kind, anchor: this.anchor };
+    return { pos: this.pos, col: this.col, size: this.size, kind: this.kind, anchor: this.anchor, axis: this.axis };
   }
 }
 
@@ -54,7 +60,7 @@ function buildAtoms(b, R) {
     for (let s = 0; s < 3; s++) {
       const n = V.norm(sphere(R));
       const e1 = V.norm(V.cross(n, sphere(R)));
-      sh.push([e1, V.cross(n, e1)]);
+      sh.push([e1, V.cross(n, e1), n]);
     }
     bases.push(sh);
   }
@@ -68,8 +74,9 @@ function buildAtoms(b, R) {
       continue;
     }
     const s = (R() * 3) | 0, rr = RAD[s] * (0.92 + R() * 0.16), th = R() * TAU;
-    const [e1, e2] = bases[a][s], cs = Math.cos(th) * rr, sn = Math.sin(th) * rr, T = TINT[s];
-    b.add(c[0] + e1[0] * cs + e2[0] * sn, c[1] + e1[1] * cs + e2[1] * sn, c[2] + e1[2] * cs + e2[2] * sn, T[0], T[1], T[2], 0.9 + R() * 0.7);
+    const [e1, e2, nrm] = bases[a][s], cs = Math.cos(th) * rr, sn = Math.sin(th) * rr, T = TINT[s];
+    b.add(c[0] + e1[0] * cs + e2[0] * sn, c[1] + e1[1] * cs + e2[1] * sn, c[2] + e1[2] * cs + e2[2] * sn, T[0], T[1], T[2], 0.9 + R() * 0.7, 9, c[0], c[1], c[2]);
+    b.setAxis(nrm[0], nrm[1], nrm[2]);
   }
   return b;
 }

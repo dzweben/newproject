@@ -43,17 +43,18 @@ function main() {
   const pos = new Float32Array(N * 3), vel = new Float32Array(N * 3);
   const tgt = new Float32Array(N * 3), col = new Float32Array(N * 3), tcol = new Float32Array(N * 3);
   const size = new Float32Array(N), kind = new Float32Array(N), anchor = new Float32Array(N * 3), seed = new Float32Array(N);
+  const axis = new Float32Array(N * 3);
   col.fill(0.5); tcol.fill(0.5);
   for (let i = 0; i < N; i++) {
     seed[i] = Math.random();
     const u = Math.random() * 2 - 1, th = Math.random() * Math.PI * 2, s = Math.sqrt(1 - u * u), r = 1 + Math.random() * 2;
     pos[i * 3] = s * Math.cos(th) * r; pos[i * 3 + 1] = u * r; pos[i * 3 + 2] = s * Math.sin(th) * r;
   }
-  R.bind({ aPos: pos, aCol: col, aSize: size, aKind: kind, aAnchor: anchor, aSeed: seed });
+  R.bind({ aPos: pos, aCol: col, aSize: size, aKind: kind, aAnchor: anchor, aAxis: axis, aSeed: seed });
 
   /* ----- DOM ----- */
   const hint = $('#hint'), nowEl = $('#now'), creditEl = $('#credit');
-  const captionEl = $('#caption'), fillEl = $('#fill'), meterEl = $('#meter');
+  const fillEl = $('#fill'), meterEl = $('#meter');
   const toggleBtn = $('#toggle'), stageList = $('#stages'), tracksEl = $('#tracks'), fileInput = $('#file');
 
   SCENES.forEach((s) => {
@@ -167,6 +168,7 @@ function main() {
 
   /* ----- story state ----- */
   let progress = 0, sceneIdx = -1;
+  let clock = 0; // runs faster with louder music, so motion follows the song
   let sumE = 0, sumT = 0; // loudness averaged over the time played, so the pace is fair to each track
   let bass = 0, mid = 0, high = 0, energy = 0, bassAvg = 0, beat = 0, lastBeat = -9;
   let pkB = 0, pkM = 0, pkH = 0;
@@ -178,16 +180,6 @@ function main() {
     progress = STARTS[k] + (hm[2] ? clamp01(+hm[2]) : 0.5) * SCENES[k].weight;
   }
 
-  let capTimer = 0;
-  function showCaption(k) {
-    const s = SCENES[k];
-    captionEl.querySelector('.idx').textContent = (k + 1) + ' / ' + SCENES.length;
-    captionEl.querySelector('.name').textContent = s.name;
-    captionEl.querySelector('.line').textContent = s.line;
-    captionEl.classList.add('on');
-    clearTimeout(capTimer);
-    capTimer = setTimeout(() => { if (progress < TOTAL) captionEl.classList.remove('on'); }, 6500);
-  }
   function markStage(k) {
     [...stageList.children].forEach((li, i) => {
       li.classList.toggle('on', i === k);
@@ -195,14 +187,16 @@ function main() {
     });
   }
   function setScene(k) {
+    const first = sceneIdx < 0;
     sceneIdx = k;
     const T = buildScene(k, N);
     tgt.set(T.pos); tcol.set(T.col);
-    size.set(T.size); kind.set(T.kind); anchor.set(T.anchor);
-    R.upload('aSize'); R.upload('aKind'); R.upload('aAnchor');
+    size.set(T.size); kind.set(T.kind); anchor.set(T.anchor); axis.set(T.axis);
+    R.upload('aSize'); R.upload('aKind'); R.upload('aAnchor'); R.upload('aAxis');
     R.setMesh(buildMesh(k));
     diffTarget = SCENES[k].spin;
-    showCaption(k);
+    // A change of scene bursts outward and flashes, so the transition is felt rather than announced.
+    if (!first) { kick(1.2); beat = 1; }
     markStage(k);
   }
 
@@ -279,6 +273,7 @@ function main() {
     const playing = !audio.paused && !audio.ended;
 
     const fired = analyse(dt, t, playing);
+    clock += dt * (0.6 + 2.4 * energy * energy + 0.8 * beat);
 
     // The story runs on the music's own clock, so slow frames never slow the song's journey.
     const aNow = audio.currentTime;
@@ -297,10 +292,9 @@ function main() {
     const k = sceneAt(progress);
     if (k !== sceneIdx) setScene(k);
     const sc = SCENES[k];
-    if (fired && sc.kick) kick(fired);
+    if (fired) kick(fired * (sc.kick ? 1 : 0.5));
 
     fillEl.style.width = (progress / TOTAL * 100).toFixed(2) + '%';
-    if (progress >= TOTAL) captionEl.classList.add('on');
 
     spin += dt * (0.25 + bass * 1.2);
     diffCur += (diffTarget - diffCur) * Math.min(1, dt * 1.5);
@@ -310,7 +304,7 @@ function main() {
     R.upload('aCol');
 
     const frac = clamp01((progress - STARTS[k]) / sc.weight);
-    const want = cameraFor(k, t, frac);
+    const want = cameraFor(k, clock, frac);
     const a = camInit ? 1 - Math.exp(-dt * 1.8) : 1;
     camInit = true;
     for (let i = 0; i < 3; i++) {
@@ -324,9 +318,10 @@ function main() {
     R.draw({
       view: lookAt(camEye, camTgt),
       proj: perspective(fovY, aspect, 0.08, 400),
-      time: t, bass, beat, spin, diff: diffCur, density,
+      time: clock, bass, mid, high, beat, spin, diff: diffCur, density,
       px: sc.px, dpr: dpr(), fog: sc.fog,
-      wave: sc.wave * (1 + bass * 0.5), wrap: sc.wrap,
+      wave: sc.wave * (0.5 + 1.8 * bass + 0.5 * beat), wrap: sc.wrap,
+      breath: sc.kick ? 1 : 0.25,
       solid: sc.solid, n: N, cam: camEye,
     });
     requestAnimationFrame(frame);
@@ -338,7 +333,7 @@ function main() {
     if (e.code === 'ArrowLeft') seekFraction(progress / TOTAL - 0.02);
   });
 
-  window.atomsDebug = () => ({ progress: +progress.toFixed(3), scene: sceneIdx, energy: +energy.toFixed(3), bass: +bass.toFixed(3), playing: !audio.paused });
+  window.atomsDebug = () => ({ progress: +progress.toFixed(3), scene: sceneIdx, energy: +energy.toFixed(3), bass: +bass.toFixed(3), clock: +clock.toFixed(2), playing: !audio.paused });
 
   if (COARSE) $('#hint').textContent = 'Pick a track below, or choose an MP3 from your phone.';
   setScene(sceneAt(progress));

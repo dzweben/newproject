@@ -9,10 +9,11 @@ in vec3 aCol;
 in float aSize;
 in float aKind;
 in vec3 aAnchor;
+in vec3 aAxis;
 in float aSeed;
 uniform mat4 uView;
 uniform mat4 uProj;
-uniform float uTime, uBass, uBeat, uSpin, uDiff, uPx, uDpr, uFog, uWave, uWrap, uDensity;
+uniform float uTime, uBass, uBeat, uSpin, uDiff, uPx, uDpr, uFog, uWave, uWrap, uDensity, uMid, uHigh, uBreath;
 out vec3 vCol;
 out float vA;
 void main() {
@@ -27,6 +28,14 @@ void main() {
     float ca = cos(a), sa = sin(a);
     p.xz = mat2(ca, sa, -sa, ca) * p.xz;
   }
+  if (k == 9) {
+    // Electrons orbit their nucleus around their own shell's normal, faster when closer.
+    vec3 d = p - aAnchor;
+    float ang = t * 0.9 / (length(d) + 0.05);
+    vec3 ax = normalize(aAxis);
+    d = d * cos(ang) + cross(ax, d) * sin(ang) + ax * dot(ax, d) * (1.0 - cos(ang));
+    p = aAnchor + d;
+  }
   if (k == 1) {
     p.x = mod(p.x + uWrap * 0.5 + t * (3.0 + 3.0 * sd), uWrap) - uWrap * 0.5;
   } else if (k == 2) {
@@ -35,37 +44,41 @@ void main() {
     p.y += uWave * (sin(p.x * 0.9 + t * 1.3) * 0.5 + sin(p.z * 1.3 - t * 1.1) * 0.35 + sin((p.x + p.z) * 0.5 + t * 0.7) * 0.25);
   } else if (k == 4) {
     float h = max(0.0, p.y - aAnchor.y);
-    float s = sin(t * 1.6 + aAnchor.x * 0.7 + aAnchor.z * 0.5 + sd * 2.0) * 0.05;
+    float s = sin(t * 1.6 + aAnchor.x * 0.7 + aAnchor.z * 0.5 + sd * 2.0) * 0.05 * (1.0 + 3.0 * uMid);
     p.x += s * h;
     p.z += s * 0.6 * h;
   } else if (k == 5) {
     float r = fract(sd + t * (0.06 + 0.08 * fract(sd * 7.3)));
-    p.y += r * 4.5;
+    p.y += r * 4.5 * (1.0 + 0.8 * uBeat);
     p.x += sin(t * 1.3 + sd * 20.0) * 0.35 * r;
     p.z += cos(t * 1.1 + sd * 13.0) * 0.35 * r;
     alpha = 1.0 - r;
   } else if (k == 6) {
     p.y += 0.12 * sin(t * 0.9 + aAnchor.x * 1.7 + aAnchor.z * 1.3);
-    float pu = 1.0 + 0.07 * sin(t * 2.6 + sd * 6.28);
-    float py = 1.0 - 0.05 * sin(t * 2.6 + sd * 6.28);
+    float pu = 1.0 + (0.06 + 0.12 * uBeat + 0.06 * uBass) * sin(t * 2.6 + sd * 6.28);
+    float py = 1.0 - (0.04 + 0.08 * uBeat) * sin(t * 2.6 + sd * 6.28);
     vec3 d = p - aAnchor;
     p = aAnchor + vec3(d.x * pu, d.y * py, d.z * pu);
   } else if (k == 7) {
     p.y += 0.12 * sin(t * 0.9 + aAnchor.x * 1.7 + aAnchor.z * 1.3);
     float h = max(0.0, aAnchor.y - p.y);
-    p.x += sin(t * 2.2 + sd * 6.28 + h * 3.0) * 0.09 * h;
-    p.z += cos(t * 1.8 + sd * 4.0 + h * 2.5) * 0.09 * h;
+    p.x += sin(t * 2.2 + sd * 6.28 + h * 3.0) * 0.09 * h * (1.0 + 2.5 * uMid);
+    p.z += cos(t * 1.8 + sd * 4.0 + h * 2.5) * 0.09 * h * (1.0 + 2.5 * uMid);
   } else if (k == 10) {
-    p += 0.035 * vec3(sin(t * 0.7 + sd * 31.0), sin(t * 0.5 + sd * 17.0), cos(t * 0.6 + sd * 47.0));
+    p += (0.035 + 0.05 * uMid) * vec3(sin(t * 0.7 + sd * 31.0), sin(t * 0.5 + sd * 17.0), cos(t * 0.6 + sd * 47.0));
   }
 
+  // Whole-scene breath: swells on bass and beats, and shimmers with the top end.
+  float pulse = 1.0 + uBreath * (0.10 * uBass + 0.08 * uBeat);
+  p *= pulse;
+  p += uBreath * uHigh * 0.018 * vec3(sin(t * 7.0 + sd * 40.0), cos(t * 6.1 + sd * 23.0), sin(t * 5.3 + sd * 11.0));
   vec4 vp = uView * vec4(p, 1.0);
   gl_Position = uProj * vp;
   float depth = max(0.1, -vp.z);
   float fog = exp(-depth * uFog);
   gl_PointSize = min(48.0, aSize * uPx * uDpr * uDensity * clamp(4.0 / depth, 0.2, 12.0));
-  vec3 c = aCol * (0.85 + 0.3 * uBeat + 0.15 * uBass) * mix(0.7, 1.0, uDensity);
-  if (k == 8) c *= 0.7 + 0.45 * sin(t * 2.0 + sd * 40.0);
+  vec3 c = aCol * (0.8 + 0.12 * uBeat + 0.05 * uBass) * mix(0.7, 1.0, uDensity);
+  if (k == 8) c *= 0.7 + 0.45 * sin(t * 2.0 + sd * 40.0) + 0.5 * uHigh;
   vCol = c * fog;
   vA = alpha;
 }`;
@@ -122,7 +135,7 @@ in vec3 vPos;
 in vec3 vNrm;
 in vec3 vCol;
 in float vEmi;
-uniform float uTime, uFog, uMode;
+uniform float uTime, uFog, uMode, uBeat;
 uniform vec3 uCam;
 out vec4 o;
 float h1(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
@@ -144,7 +157,7 @@ void main() {
       float lit = step(0.42, r);
       vec3 wc = h1(id + 3.7) > 0.6 ? vec3(0.55, 0.85, 1.0) : vec3(1.0, 0.8, 0.5);
       float flick = 0.92 + 0.08 * sin(uTime * 0.8 + r * 60.0);
-      vec3 win = wc * (lit * 1.3 * flick + 0.035);
+      vec3 win = wc * (lit * 1.3 * flick + 0.035) * (1.0 + 1.2 * uBeat);
       col = mix(col, win, inwin);
     }
   }
@@ -157,7 +170,7 @@ void main() {
     col += vec3(1.0, 0.97, 0.9) * pow(max(dot(n, H), 0.0), 140.0) * 1.1;
   }
 
-  col += vec3(1.0, 0.42, 0.1) * vEmi * (1.1 + 0.3 * sin(uTime * 2.0 + vPos.x * 3.0 + vPos.z * 2.0)) * 1.6;
+  col += vec3(1.0, 0.42, 0.1) * vEmi * (1.1 + 0.3 * sin(uTime * 2.0 + vPos.x * 3.0 + vPos.z * 2.0) + 0.8 * uBeat) * 1.6;
 
   float depth = length(vPos - uCam);
   float f = exp(-depth * uFog);
@@ -165,11 +178,11 @@ void main() {
   o = vec4(mix(bg, col, f), 1.0);
 }`;
 
-const ATTRIBS = { aPos: 3, aCol: 3, aSize: 1, aKind: 1, aAnchor: 3, aSeed: 1 };
+const ATTRIBS = { aPos: 3, aCol: 3, aSize: 1, aKind: 1, aAnchor: 3, aAxis: 3, aSeed: 1 };
 const MATTRIBS = { aPos: 3, aNrm: 3, aCol: 3, aEmi: 1 };
 const MESH_KEYS = { aPos: 'pos', aNrm: 'nrm', aCol: 'col', aEmi: 'emi' };
-const PUNI = ['uView', 'uProj', 'uTime', 'uBass', 'uBeat', 'uSpin', 'uDiff', 'uPx', 'uDpr', 'uFog', 'uWave', 'uWrap', 'uSolid', 'uDensity'];
-const MUNI = ['uView', 'uProj', 'uTime', 'uWave', 'uMode', 'uFog', 'uCam'];
+const PUNI = ['uView', 'uProj', 'uTime', 'uBass', 'uBeat', 'uSpin', 'uDiff', 'uPx', 'uDpr', 'uFog', 'uWave', 'uWrap', 'uSolid', 'uDensity', 'uMid', 'uHigh', 'uBreath'];
+const MUNI = ['uView', 'uProj', 'uTime', 'uWave', 'uMode', 'uFog', 'uCam', 'uBeat'];
 
 export function createRenderer(canvas) {
   const gl = canvas.getContext('webgl2', { antialias: false, alpha: false, premultipliedAlpha: false, powerPreference: 'high-performance' });
@@ -278,6 +291,7 @@ export function createRenderer(canvas) {
       gl.uniformMatrix4fv(MU.uProj, false, f.proj);
       gl.uniform1f(MU.uTime, f.time);
       gl.uniform1f(MU.uWave, f.wave);
+      gl.uniform1f(MU.uBeat, f.beat);
       gl.uniform1f(MU.uFog, f.fog);
       gl.uniform3f(MU.uCam, f.cam[0], f.cam[1], f.cam[2]);
       for (const c of chunks) {
@@ -302,6 +316,9 @@ export function createRenderer(canvas) {
     gl.uniform1f(PU.uFog, f.fog);
     gl.uniform1f(PU.uWave, 0);
     gl.uniform1f(PU.uWrap, f.wrap);
+    gl.uniform1f(PU.uMid, f.mid);
+    gl.uniform1f(PU.uHigh, f.high);
+    gl.uniform1f(PU.uBreath, f.breath);
     gl.uniform1f(PU.uDensity, f.density);
     gl.uniform1f(PU.uSolid, f.solid ? 1 : 0);
 

@@ -38,28 +38,6 @@ html, body {
 }
 .top .sub { margin: 4px 0 0; color: var(--dim); font-size: 12px; letter-spacing: 0.02em; }
 
-.caption {
-  position: fixed; left: 0; right: 0; top: 15%; z-index: 2;
-  padding: 0 max(24px, env(safe-area-inset-right, 0px)) 0 max(24px, env(safe-area-inset-left, 0px));
-  text-align: center; pointer-events: none;
-  opacity: 0; transform: translateY(8px);
-  transition: opacity 1.4s ease, transform 1.4s ease;
-  text-shadow: 0 2px 24px rgba(0, 0, 0, 0.8);
-}
-.caption.on { opacity: 1; transform: none; }
-.caption .idx {
-  margin: 0 0 14px; color: var(--dim); font-size: 11px;
-  letter-spacing: 0.32em; text-transform: uppercase; font-variant-numeric: tabular-nums;
-}
-.caption .name {
-  margin: 0; font: 300 clamp(38px, 7.4vw, 96px)/1 var(--serif);
-  letter-spacing: -0.005em; text-wrap: balance;
-  text-shadow: 0 0 40px rgba(143, 220, 255, 0.28), 0 2px 24px rgba(0, 0, 0, 0.8);
-}
-.caption .line {
-  margin: 18px auto 0; max-width: 34em; color: #c9d2e6;
-  font: italic 300 clamp(16px, 1.7vw, 21px)/1.45 var(--serif); text-wrap: balance;
-}
 
 .hint {
   position: fixed; left: 0; right: 0; top: calc(64px + env(safe-area-inset-top, 0px));
@@ -131,7 +109,6 @@ button.on { border-color: var(--gold); color: var(--gold); }
 @media (max-width: 720px) {
   .stages { display: none; }
   .dock { padding-top: 26px; padding-bottom: calc(10px + env(safe-area-inset-bottom, 0px)); }
-  .caption { top: 21%; }
   .hint { top: calc(60px + env(safe-area-inset-top, 0px)); }
   .row { flex-wrap: wrap; gap: 12px; }
   .now { flex: 1 1 0; }
@@ -151,9 +128,7 @@ button.on { border-color: var(--gold); color: var(--gold); }
 @media (max-height: 520px) and (orientation: landscape) {
   .dock { padding-top: 16px; padding-bottom: calc(8px + env(safe-area-inset-bottom, 0px)); }
   .meter { height: 22px; margin-bottom: 6px; }
-  .now small, .caption .line { display: none; }
-  .caption { top: 9%; }
-  .caption .name { font-size: clamp(30px, 6vw, 56px); }
+  .now small { display: none; }
   .hint { top: calc(50px + env(safe-area-inset-top, 0px)); }
   .round { width: 40px; height: 40px; }
 }
@@ -162,5 +137,5 @@ button.on { border-color: var(--gold); color: var(--gold); }
   button, .btn { -webkit-tap-highlight-color: transparent; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .caption, .stages li, #curtain { transition: none; }
+  .stages li, #curtain { transition: none; }
 }
