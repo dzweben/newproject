@@ -75,7 +75,7 @@ function buildAtoms(b, R) {
     const i = b.n, a = i % A, c = centers[a];
     if (R() < 0.05) {
       const d = sphere(R), q = 0.03 * Math.cbrt(R());
-      b.add(c[0] + d[0] * q, c[1] + d[1] * q, c[2] + d[2] * q, 1, 0.62, 0.32, 1.8);
+      b.add(c[0] + d[0] * q, c[1] + d[1] * q, c[2] + d[2] * q, 1, 0.62, 0.32, 0.9);
       continue;
     }
     const s = (R() * 3) | 0, rr = RAD[s] * (0.92 + R() * 0.16), th = R() * TAU;
@@ -90,7 +90,7 @@ function buildAtoms(b, R) {
     for (let j = 0; j <= 48; j++) {
       const th = (j / 48) * TAU, cs = Math.cos(th) * rr, sn = Math.sin(th) * rr;
       const p = [c[0] + e1[0] * cs + e2[0] * sn, c[1] + e1[1] * cs + e2[1] * sn, c[2] + e1[2] * cs + e2[2] * sn];
-      if (prev) b.seg(prev, p, [T[0], T[1], T[2]], 1.2);
+      if (prev) b.seg(prev, p, [T[0], T[1], T[2]], 2.4);
       prev = p;
     }
   }
@@ -134,13 +134,13 @@ function buildShapes(b, R) {
 
 function buildGalaxies(b, R) {
   while (!b.full) {
-    if (R() < 0.1) {
+    if (R() < 0.035) {
       const d = sphere(R), q = 0.17 * Math.pow(R(), 0.6);
       b.add(d[0] * q, d[1] * q * 0.45, d[2] * q, 1, 0.86, 0.6, 1.5);
       continue;
     }
     const arm = b.n % 3, r = 0.1 + 1.15 * Math.pow(R(), 0.85);
-    const th = arm * TAU / 3 + 3.0 * Math.log(1 + r * 5) + gauss(R) * 0.2 * (0.25 + r);
+    const th = arm * TAU / 3 + 3.0 * Math.log(1 + r * 5) + gauss(R) * 0.07 * (0.25 + r);
     const t = Math.min(1, r / 1.2);
     let c = [0.95 - 0.45 * t, 0.9 - 0.25 * t, 1.0];
     if (R() < 0.07) c = [1, 0.42, 0.62];
@@ -152,7 +152,7 @@ function buildGalaxies(b, R) {
     for (let j = 0; j <= 90; j++) {
       const r = 0.1 + 1.15 * Math.pow(j / 90, 0.85), th = arm * TAU / 3 + 3.0 * Math.log(1 + r * 5);
       const p = [r * Math.cos(th), 0, r * Math.sin(th)];
-      if (prev) b.seg(prev, p, [0.7, 0.8, 1], 0.9);
+      if (prev) b.seg(prev, p, [0.7, 0.8, 1], 2.2);
       prev = p;
     }
   }
@@ -447,6 +447,22 @@ export const SCENES = [
     },
   },
 ];
+
+// Each scene's palette: a deep base, a mid tone and a highlight. The backdrop and fog use them.
+const PALS = [
+  [[0.02, 0.03, 0.12], [0.15, 0.25, 0.6], [0.9, 0.35, 0.7]],
+  [[0.02, 0.06, 0.07], [0.1, 0.4, 0.45], [1.0, 0.75, 0.35]],
+  [[0.04, 0.02, 0.1], [0.35, 0.2, 0.6], [0.9, 0.5, 0.8]],
+  [[0.01, 0.02, 0.07], [0.2, 0.3, 0.65], [0.55, 0.45, 1.0]],
+  [[0.0, 0.07, 0.07], [0.1, 0.5, 0.45], [0.9, 0.4, 0.8]],
+  [[0.01, 0.04, 0.09], [0.15, 0.35, 0.6], [0.6, 0.9, 1.0]],
+  [[0.01, 0.02, 0.06], [0.1, 0.3, 0.6], [1.0, 0.6, 0.3]],
+  [[0.02, 0.06, 0.09], [0.1, 0.35, 0.45], [1.0, 0.6, 0.35]],
+  [[0.07, 0.01, 0.01], [0.5, 0.12, 0.03], [1.0, 0.6, 0.15]],
+  [[0.02, 0.06, 0.03], [0.15, 0.35, 0.15], [0.95, 0.8, 0.4]],
+  [[0.03, 0.02, 0.1], [0.3, 0.15, 0.4], [1.0, 0.75, 0.4]],
+];
+SCENES.forEach((sc, i) => { sc.pal = PALS[i]; });
 
 export const STARTS = [];
 let acc = 0;

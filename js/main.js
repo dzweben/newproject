@@ -158,6 +158,7 @@ function main() {
   /* ----- story state ----- */
   let progress = 0, sceneIdx = -1;
   let clock = 0; // runs faster with louder music, so motion follows the song
+  let palCur = SCENES[0].pal.map((c) => c.slice()); // blends toward each scene's palette
   let sumE = 0, sumT = 0; // loudness averaged over the time played, so the pace is fair to each track
   let bass = 0, mid = 0, high = 0, energy = 0, bassAvg = 0, beat = 0, lastBeat = -9;
   let pkB = 0, pkM = 0, pkH = 0;
@@ -303,14 +304,20 @@ function main() {
 
     const aspect = canvas.width / canvas.height;
     const fovY = 2 * Math.atan(Math.tan(fovCur * Math.PI / 360) / Math.min(1, aspect));
+    // The camera pushes in on each beat and eases back.
+    const pk = 0.05 * beat;
+    const eyeP = camEye.map((v, i) => v + (camTgt[i] - v) * pk);
+    const pt = SCENES[k].pal;
+    for (let i = 0; i < 3; i++) for (let j = 0; j < 3; j++) palCur[i][j] += (pt[i][j] - palCur[i][j]) * Math.min(1, dt * 0.8);
     R.draw({
-      view: lookAt(camEye, camTgt),
+      view: lookAt(eyeP, camTgt),
       proj: perspective(fovY, aspect, 0.08, 400),
       time: clock, bass, mid, high, beat, spin, diff: diffCur, density,
       px: sc.px, dpr: dpr(), fog: sc.fog,
       wave: sc.wave * (0.5 + 1.8 * bass + 0.5 * beat), wrap: sc.wrap,
       breath: sc.noBreath ? 0 : (sc.kick ? 1 : 0.25), sway: sc.sway || 0,
-      solid: sc.solid, n: N, cam: camEye,
+      solid: sc.solid, n: N, cam: eyeP,
+      pal: palCur, amp: 0.55, bloom: 0.45 + 0.6 * beat + 0.25 * (bass - 0.5),
     });
     requestAnimationFrame(frame);
   }

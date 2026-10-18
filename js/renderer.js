@@ -1,6 +1,9 @@
-// WebGL2 renderer with two passes.
-// 1. Geometry: lit triangle chunks for ground scenes (terrain, water, city facades).
-// 2. Particles: additive points with per-kind motion, layered over the geometry.
+// WebGL2 renderer. Each frame runs five passes:
+// 1. Nebula: a slowly moving backdrop tinted by the scene's palette.
+// 2. Geometry: lit triangle chunks for ground scenes. Line art is additive.
+// 3. Particles: additive points with per-kind motion.
+// 4. Bloom: bright areas are blurred at quarter resolution.
+// 5. Composite: scene plus bloom, tone-mapped and vignetted.
 
 const PVS = `#version 300 es
 precision highp float;
@@ -72,6 +75,7 @@ void main() {
   float pulse = 1.0 + uBreath * (0.22 * (uBass - 0.5) + 0.14 * uBeat);
   p *= pulse;
   p += uBreath * max(0.0, uHigh - 0.4) * 0.05 * vec3(sin(t * 7.0 + sd * 40.0), cos(t * 6.1 + sd * 23.0), sin(t * 5.3 + sd * 11.0));
+
   vec4 vp = uView * vec4(p, 1.0);
   gl_Position = uProj * vp;
   float depth = max(0.1, -vp.z);
@@ -96,7 +100,7 @@ void main() {
   float disc = 1.0 - smoothstep(0.3, 1.0, d);
   float a = mix(glow, disc, uSolid) * vA;
   if (a < 0.02) discard;
-  o = vec4(vCol * a * mix(0.6, 0.45, uSolid), 1.0);
+  o = vec4(vCol * a * mix(0.22, 0.2, uSolid), 1.0);
 }`;
 
 const MVS = `#version 300 es
@@ -193,11 +197,97 @@ void main() {
   o = vec4(mix(bg, col, f), 1.0);
 }`;
 
+const QVS = `#version 300 es
+in vec2 aQ;
+out vec2 vUv;
+void main() {
+  vUv = aQ * 0.5 + 0.5;
+  gl_Position = vec4(aQ, 0.0, 1.0);
+}`;
+
+const NFS = `#version 300 es
+precision highp float;
+in vec2 vUv;
+out vec4 o;
+uniform vec2 uRes;
+uniform float uTime, uBass, uBeat, uAmp;
+uniform vec3 uC0, uC1, uC2;
+float h(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+float nz(vec2 p) {
+  vec2 i = floor(p), f = fract(p);
+  f = f * f * (3.0 - 2.0 * f);
+  return mix(mix(h(i), h(i + vec2(1.0, 0.0)), f.x), mix(h(i + vec2(0.0, 1.0)), h(i + vec2(1.0, 1.0)), f.x), f.y);
+}
+float fbm(vec2 p) {
+  float s = 0.0, a = 0.5;
+  for (int i = 0; i < 4; i++) { s += a * nz(p); p = p * 2.03 + vec2(1.7, 9.2); a *= 0.5; }
+  return s;
+}
+void main() {
+  vec2 p = (vUv * uRes - 0.5 * uRes) / uRes.y;
+  float t = uTime * 0.04;
+  vec2 q = vec2(fbm(p * 1.6 + t), fbm(p * 1.6 + vec2(5.2, 1.3) - t));
+  vec2 r = vec2(fbm(p * 2.0 + 3.0 * q + vec2(1.7, 9.2) + t * 0.7), fbm(p * 2.0 + 3.0 * q + vec2(8.3, 2.8)));
+  float f = fbm(p * 1.4 + 2.5 * r);
+  vec3 col = mix(uC0, uC1, clamp(f * 1.6, 0.0, 1.0));
+  col = mix(col, uC2, clamp(r.x * r.x * 1.4, 0.0, 1.0));
+  float vig = clamp(1.0 - 0.5 * dot(p, p), 0.0, 1.0);
+  float amp = uAmp * (0.75 + 0.45 * uBass + 0.35 * uBeat);
+  o = vec4(col * f * f * 1.6 * amp * vig, 1.0);
+}`;
+
+const BFS = `#version 300 es
+precision highp float;
+in vec2 vUv;
+out vec4 o;
+uniform sampler2D uSrc;
+uniform vec2 uTexel;
+void main() {
+  vec3 c = texture(uSrc, vUv + uTexel * vec2(-1.0, -1.0)).rgb;
+  c += texture(uSrc, vUv + uTexel * vec2(1.0, -1.0)).rgb;
+  c += texture(uSrc, vUv + uTexel * vec2(-1.0, 1.0)).rgb;
+  c += texture(uSrc, vUv + uTexel * vec2(1.0, 1.0)).rgb;
+  c *= 0.25;
+  float l = max(c.r, max(c.g, c.b));
+  float k = max(l - 0.28, 0.0) / max(l, 1e-4);
+  o = vec4(c * k, 1.0);
+}`;
+
+const BLFS = `#version 300 es
+precision highp float;
+in vec2 vUv;
+out vec4 o;
+uniform sampler2D uSrc;
+uniform vec2 uDir;
+void main() {
+  vec3 c = texture(uSrc, vUv).rgb * 0.227027;
+  c += texture(uSrc, vUv + uDir * 1.384615).rgb * 0.316216;
+  c += texture(uSrc, vUv - uDir * 1.384615).rgb * 0.316216;
+  c += texture(uSrc, vUv + uDir * 3.230769).rgb * 0.070270;
+  c += texture(uSrc, vUv - uDir * 3.230769).rgb * 0.070270;
+  o = vec4(c, 1.0);
+}`;
+
+const CFS = `#version 300 es
+precision highp float;
+in vec2 vUv;
+out vec4 o;
+uniform sampler2D uScene, uBloom;
+uniform float uBloomK;
+void main() {
+  vec3 c = texture(uScene, vUv).rgb + texture(uBloom, vUv).rgb * uBloomK;
+  c = vec3(1.0) - exp(-c * 1.0);
+  vec2 p = vUv - 0.5;
+  c *= 1.0 - 0.6 * dot(p, p) * 2.0;
+  o = vec4(c, 1.0);
+}`;
+
 const ATTRIBS = { aPos: 3, aCol: 3, aSize: 1, aKind: 1, aAnchor: 3, aAxis: 3, aSeed: 1 };
 const MATTRIBS = { aPos: 3, aNrm: 3, aCol: 3, aEmi: 1 };
 const MESH_KEYS = { aPos: 'pos', aNrm: 'nrm', aCol: 'col', aEmi: 'emi' };
 const PUNI = ['uView', 'uProj', 'uTime', 'uBass', 'uBeat', 'uSpin', 'uDiff', 'uPx', 'uDpr', 'uFog', 'uWave', 'uWrap', 'uSolid', 'uDensity', 'uMid', 'uHigh', 'uBreath'];
 const MUNI = ['uView', 'uProj', 'uTime', 'uWave', 'uMode', 'uFog', 'uCam', 'uBeat', 'uBass', 'uMid', 'uSway', 'uBreath'];
+const NUNI = ['uRes', 'uTime', 'uBass', 'uBeat', 'uAmp', 'uC0', 'uC1', 'uC2'];
 
 export function createRenderer(canvas) {
   const gl = canvas.getContext('webgl2', { antialias: false, alpha: false, premultipliedAlpha: false, powerPreference: 'high-performance' });
@@ -218,22 +308,39 @@ export function createRenderer(canvas) {
     if (!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(p));
     return p;
   };
-  const prog = link(PVS, PFS);
-  const mprog = link(MVS, MFS);
-  const PU = {}, MU = {};
-  gl.useProgram(prog);
-  for (const n of PUNI) PU[n] = gl.getUniformLocation(prog, n);
-  gl.useProgram(mprog);
-  for (const n of MUNI) MU[n] = gl.getUniformLocation(mprog, n);
+  const quadBuf = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, quadBuf);
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]), gl.STATIC_DRAW);
+  // Each program gets its own vertex array for the full-screen quad, so attribute locations always match.
+  function program(vs, fs, names) {
+    const p = link(vs, fs), u = {};
+    gl.useProgram(p);
+    for (const n of names) u[n] = gl.getUniformLocation(p, n);
+    const vao = gl.createVertexArray();
+    gl.bindVertexArray(vao);
+    gl.bindBuffer(gl.ARRAY_BUFFER, quadBuf);
+    const loc = gl.getAttribLocation(p, 'aQ');
+    if (loc >= 0) { gl.enableVertexAttribArray(loc); gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0); }
+    gl.bindVertexArray(null);
+    return { p, u, vao };
+  }
 
+  const PR = program(PVS, PFS, PUNI);
+  const MR = program(MVS, MFS, MUNI);
+  const NR = program(QVS, NFS, NUNI);
+  const BR = program(QVS, BFS, ['uSrc', 'uTexel']);
+  const BLR = program(QVS, BLFS, ['uSrc', 'uDir']);
+  const CR = program(QVS, CFS, ['uScene', 'uBloom', 'uBloomK']);
+
+  /* ----- particles ----- */
   const particleVao = gl.createVertexArray();
   gl.bindVertexArray(particleVao);
   const buffers = {};
   function bind(state) {
-    gl.useProgram(prog);
+    gl.useProgram(PR.p);
     for (const name of Object.keys(ATTRIBS)) {
       const data = state[name];
-      const loc = gl.getAttribLocation(prog, name);
+      const loc = gl.getAttribLocation(PR.p, name);
       const buf = gl.createBuffer();
       gl.bindBuffer(gl.ARRAY_BUFFER, buf);
       gl.bufferData(gl.ARRAY_BUFFER, data, gl.DYNAMIC_DRAW);
@@ -250,7 +357,7 @@ export function createRenderer(canvas) {
     gl.bufferSubData(gl.ARRAY_BUFFER, 0, data);
   }
 
-  // Geometry chunks. Each chunk gets its own VAO; old ones are released on replacement.
+  /* ----- geometry chunks: each chunk has its own vertex array ----- */
   let chunks = [];
   function setMesh(list) {
     for (const c of chunks) {
@@ -265,7 +372,7 @@ export function createRenderer(canvas) {
       const bufs = [];
       for (const [name, comps] of Object.entries(MATTRIBS)) {
         const data = ch[MESH_KEYS[name]];
-        const loc = gl.getAttribLocation(mprog, name);
+        const loc = gl.getAttribLocation(MR.p, name);
         const buf = gl.createBuffer();
         gl.bindBuffer(gl.ARRAY_BUFFER, buf);
         gl.bufferData(gl.ARRAY_BUFFER, data, gl.STATIC_DRAW);
@@ -280,78 +387,129 @@ export function createRenderer(canvas) {
     gl.bindVertexArray(null);
   }
 
+  /* ----- offscreen targets ----- */
+  function makeTarget(w, h, depth) {
+    const tex = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, tex);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, w, h, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    const fb = gl.createFramebuffer();
+    gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
+    let rb = null;
+    if (depth) {
+      rb = gl.createRenderbuffer();
+      gl.bindRenderbuffer(gl.RENDERBUFFER, rb);
+      gl.renderbufferStorage(gl.RENDERBUFFER, gl.DEPTH_COMPONENT24, w, h);
+      gl.framebufferRenderbuffer(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, gl.RENDERBUFFER, rb);
+    }
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    return { fb, tex, rb, w, h };
+  }
+  function freeTarget(t) {
+    if (!t) return;
+    gl.deleteFramebuffer(t.fb);
+    gl.deleteTexture(t.tex);
+    if (t.rb) gl.deleteRenderbuffer(t.rb);
+  }
+  let scene = null, bloomA = null, bloomB = null;
+
   function resize(w, h) {
     canvas.width = w;
     canvas.height = h;
-    gl.viewport(0, 0, w, h);
+    freeTarget(scene); freeTarget(bloomA); freeTarget(bloomB);
+    const bw = Math.max(1, w >> 2), bh = Math.max(1, h >> 2);
+    scene = makeTarget(w, h, true);
+    bloomA = makeTarget(bw, bh, false);
+    bloomB = makeTarget(bw, bh, false);
   }
 
-  gl.enable(gl.BLEND);
-  gl.blendFunc(gl.ONE, gl.ONE);
+  /* ----- passes ----- */
+  const toTarget = (t) => {
+    gl.bindFramebuffer(gl.FRAMEBUFFER, t ? t.fb : null);
+    gl.viewport(0, 0, t ? t.w : canvas.width, t ? t.h : canvas.height);
+  };
+  const bindTex = (unit, tex) => { gl.activeTexture(gl.TEXTURE0 + unit); gl.bindTexture(gl.TEXTURE_2D, tex); };
+  const fullscreen = (pr) => { gl.useProgram(pr.p); gl.bindVertexArray(pr.vao); gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4); };
 
-  // f: { view, proj, cam, time, bass, beat, spin, diff, px, dpr, fog, wave, wrap, solid, n }
-  function draw(f) {
-    gl.clearColor(0.012, 0.014, 0.03, 1);
-    gl.clearDepth(1);
+  function drawNebula(f) {
+    gl.disable(gl.BLEND);
+    gl.disable(gl.DEPTH_TEST);
+    gl.useProgram(NR.p);
+    gl.uniform2f(NR.u.uRes, canvas.width, canvas.height);
+    gl.uniform1f(NR.u.uTime, f.time);
+    gl.uniform1f(NR.u.uBass, f.bass);
+    gl.uniform1f(NR.u.uBeat, f.beat);
+    gl.uniform1f(NR.u.uAmp, f.amp);
+    gl.uniform3fv(NR.u.uC0, f.pal[0]);
+    gl.uniform3fv(NR.u.uC1, f.pal[1]);
+    gl.uniform3fv(NR.u.uC2, f.pal[2]);
+    gl.bindVertexArray(NR.vao);
+    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+  }
+
+  function drawGeometry(f) {
+    if (!chunks.length) return;
+    gl.useProgram(MR.p);
+    gl.disable(gl.BLEND);
+    gl.enable(gl.DEPTH_TEST);
+    gl.depthFunc(gl.LESS);
     gl.depthMask(true);
-    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
-
-    if (chunks.length) {
-      gl.useProgram(mprog);
-      gl.disable(gl.BLEND);
-      gl.enable(gl.DEPTH_TEST);
-      gl.depthFunc(gl.LESS);
-      gl.depthMask(true);
-      gl.uniformMatrix4fv(MU.uView, false, f.view);
-      gl.uniformMatrix4fv(MU.uProj, false, f.proj);
-      gl.uniform1f(MU.uTime, f.time);
-      gl.uniform1f(MU.uWave, f.wave);
-      gl.uniform1f(MU.uBeat, f.beat);
-      gl.uniform1f(MU.uBass, f.bass);
-      gl.uniform1f(MU.uMid, f.mid);
-      gl.uniform1f(MU.uSway, f.sway || 0);
-      gl.uniform1f(MU.uBreath, f.breath);
-      gl.uniform1f(MU.uFog, f.fog);
-      gl.uniform3f(MU.uCam, f.cam[0], f.cam[1], f.cam[2]);
-      for (const c of chunks) {
-        gl.bindVertexArray(c.vao);
-        gl.uniform1f(MU.uMode, c.mode);
-        if (c.mode > 8.5) {
-          // Line art is additive and writes no depth, so it glows over the geometry.
-          gl.enable(gl.BLEND);
-          gl.blendFunc(gl.ONE, gl.ONE);
-          gl.depthMask(false);
-          gl.drawArrays(gl.LINES, 0, c.count);
-          gl.disable(gl.BLEND);
-          gl.depthMask(true);
-        } else {
-          gl.drawArrays(gl.TRIANGLES, 0, c.count);
-        }
+    gl.uniformMatrix4fv(MR.u.uView, false, f.view);
+    gl.uniformMatrix4fv(MR.u.uProj, false, f.proj);
+    gl.uniform1f(MR.u.uTime, f.time);
+    gl.uniform1f(MR.u.uWave, f.wave);
+    gl.uniform1f(MR.u.uFog, f.fog);
+    gl.uniform3f(MR.u.uCam, f.cam[0], f.cam[1], f.cam[2]);
+    gl.uniform1f(MR.u.uBeat, f.beat);
+    gl.uniform1f(MR.u.uBass, f.bass);
+    gl.uniform1f(MR.u.uMid, f.mid);
+    gl.uniform1f(MR.u.uSway, f.sway || 0);
+    gl.uniform1f(MR.u.uBreath, f.breath);
+    for (const c of chunks) {
+      gl.bindVertexArray(c.vao);
+      gl.uniform1f(MR.u.uMode, c.mode);
+      if (c.mode > 8.5) {
+        // Line art is additive and writes no depth, so it glows over the geometry.
+        gl.enable(gl.BLEND);
+        gl.blendFunc(gl.ONE, gl.ONE);
+        gl.depthMask(false);
+        gl.drawArrays(gl.LINES, 0, c.count);
+        gl.disable(gl.BLEND);
+        gl.depthMask(true);
+      } else {
+        gl.drawArrays(gl.TRIANGLES, 0, c.count);
       }
-      gl.bindVertexArray(null);
     }
+    gl.bindVertexArray(null);
+  }
 
-    gl.useProgram(prog);
+  function drawParticles(f) {
+    gl.useProgram(PR.p);
     gl.bindVertexArray(particleVao);
-    gl.uniformMatrix4fv(PU.uView, false, f.view);
-    gl.uniformMatrix4fv(PU.uProj, false, f.proj);
-    gl.uniform1f(PU.uTime, f.time);
-    gl.uniform1f(PU.uBass, f.bass);
-    gl.uniform1f(PU.uBeat, f.beat);
-    gl.uniform1f(PU.uSpin, f.spin);
-    gl.uniform1f(PU.uDiff, f.diff);
-    gl.uniform1f(PU.uPx, f.px);
-    gl.uniform1f(PU.uDpr, f.dpr);
-    gl.uniform1f(PU.uFog, f.fog);
-    gl.uniform1f(PU.uWave, 0);
-    gl.uniform1f(PU.uWrap, f.wrap);
-    gl.uniform1f(PU.uMid, f.mid);
-    gl.uniform1f(PU.uHigh, f.high);
-    gl.uniform1f(PU.uBreath, f.breath);
-    gl.uniform1f(PU.uDensity, f.density);
-    gl.uniform1f(PU.uSolid, f.solid ? 1 : 0);
+    gl.uniformMatrix4fv(PR.u.uView, false, f.view);
+    gl.uniformMatrix4fv(PR.u.uProj, false, f.proj);
+    gl.uniform1f(PR.u.uTime, f.time);
+    gl.uniform1f(PR.u.uBass, f.bass);
+    gl.uniform1f(PR.u.uBeat, f.beat);
+    gl.uniform1f(PR.u.uSpin, f.spin);
+    gl.uniform1f(PR.u.uDiff, f.diff);
+    gl.uniform1f(PR.u.uPx, f.px);
+    gl.uniform1f(PR.u.uDpr, f.dpr);
+    gl.uniform1f(PR.u.uFog, f.fog);
+    gl.uniform1f(PR.u.uWave, 0);
+    gl.uniform1f(PR.u.uWrap, f.wrap);
+    gl.uniform1f(PR.u.uDensity, f.density);
+    gl.uniform1f(PR.u.uMid, f.mid);
+    gl.uniform1f(PR.u.uHigh, f.high);
+    gl.uniform1f(PR.u.uBreath, f.breath);
+    gl.uniform1f(PR.u.uSolid, f.solid ? 1 : 0);
 
     if (f.solid) {
+      // Depth pre-pass: the front-most points write depth without colour.
       gl.enable(gl.DEPTH_TEST);
       gl.depthFunc(gl.LESS);
       gl.colorMask(false, false, false, false);
@@ -371,6 +529,57 @@ export function createRenderer(canvas) {
     gl.blendFunc(gl.ONE, gl.ONE);
     gl.drawArrays(gl.POINTS, 0, f.n);
     gl.depthMask(true);
+  }
+
+  // f: { view, proj, cam, time, bass, mid, high, beat, spin, diff, density, px, dpr, fog, wave, wrap,
+  //      breath, sway, solid, n, pal, amp, bloom }
+  function draw(f) {
+    // 1. Scene: nebula, geometry and particles, into an offscreen target.
+    toTarget(scene);
+    gl.disable(gl.BLEND);
+    gl.disable(gl.DEPTH_TEST);
+    gl.depthMask(true);
+    gl.clearColor(0, 0, 0, 1);
+    gl.clearDepth(1);
+    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+    drawNebula(f);
+    drawGeometry(f);
+    drawParticles(f);
+
+    // 2. Bloom: bright areas, then two blur rounds that spread wider each time.
+    gl.disable(gl.DEPTH_TEST);
+    gl.disable(gl.BLEND);
+    gl.depthMask(false);
+    toTarget(bloomA);
+    gl.useProgram(BR.p);
+    bindTex(0, scene.tex);
+    gl.uniform1i(BR.u.uSrc, 0);
+    gl.uniform2f(BR.u.uTexel, 2 / scene.w, 2 / scene.h);
+    fullscreen(BR);
+    for (let i = 0; i < 2; i++) {
+      const spread = 1 + i * 1.6;
+      toTarget(bloomB);
+      gl.useProgram(BLR.p);
+      bindTex(0, bloomA.tex);
+      gl.uniform1i(BLR.u.uSrc, 0);
+      gl.uniform2f(BLR.u.uDir, spread / bloomA.w, 0);
+      fullscreen(BLR);
+      toTarget(bloomA);
+      bindTex(0, bloomB.tex);
+      gl.uniform2f(BLR.u.uDir, 0, spread / bloomA.h);
+      fullscreen(BLR);
+    }
+
+    // 3. Composite to the screen.
+    toTarget(null);
+    gl.useProgram(CR.p);
+    bindTex(0, scene.tex);
+    gl.uniform1i(CR.u.uScene, 0);
+    bindTex(1, bloomA.tex);
+    gl.uniform1i(CR.u.uBloom, 1);
+    gl.uniform1f(CR.u.uBloomK, f.bloom);
+    fullscreen(CR);
+    gl.activeTexture(gl.TEXTURE0);
   }
 
   return { bind, upload, setMesh, resize, draw };
