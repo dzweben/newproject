@@ -2,7 +2,7 @@
 // Each builder returns chunks: { mode, count, pos, nrm, col, emi }.
 // mode: 0 terrain, 1 city facades (lit windows), 2 water (waves and glints).
 
-import { V, mix, clamp01, prng, fbm2 } from './math.js';
+import { V, mix, clamp01, prng, fbm2, fbm3 } from './math.js';
 import { coastH, volcH, forestH, distToPath, lavaAt, BLOCKS, CITY } from './terrain.js';
 import { SMALL, grid } from './device.js';
 
@@ -145,4 +145,43 @@ export function downtownMesh() {
     box(towers, bl.cx - H, bl.cx + H, 0, bl.h, bl.cz - H, bl.cz + H, [0.1, 0.11, 0.15], [0.15, 0.15, 0.19]);
   }
   return [ground.out(0), towers.out(1)];
+}
+
+// Line segments as one chunk: two vertices per segment, drawn additively and without depth writes.
+export function lineChunk(segs) {
+  const n = segs.length * 2;
+  const pos = new Float32Array(n * 3), nrm = new Float32Array(n * 3), col = new Float32Array(n * 3), emi = new Float32Array(n);
+  segs.forEach((s, i) => {
+    for (let v = 0; v < 2; v++) {
+      const o = i * 2 + v, q = v ? s.b : s.a;
+      pos.set(q, o * 3);
+      col.set(s.c, o * 3);
+      emi[o] = s.e;
+    }
+  });
+  return { mode: 9, count: n, pos, nrm, col, emi };
+}
+
+// A lit globe with continents, oceans and ice caps.
+export function earthMesh() {
+  const mb = new MB();
+  const LAT = 90, LON = 150, Rr = 1.5;
+  const vtx = (i, j) => {
+    const th = (i / LAT) * Math.PI, ph = (j / LON) * Math.PI * 2;
+    const d = [Math.sin(th) * Math.cos(ph), Math.cos(th), Math.sin(th) * Math.sin(ph)];
+    const n = fbm3(d[0] * 1.8 + 4.1, d[1] * 1.8, d[2] * 1.8 + 7.3, 41, 5);
+    let c;
+    if (Math.abs(d[1]) > 0.86) c = [0.92, 0.96, 1.0];
+    else if (n < 0.5) {
+      const depth = clamp01((0.5 - n) * 2.2);
+      c = [mix(0.12, 0.02, depth), mix(0.46, 0.14, depth), mix(0.75, 0.4, depth)];
+    } else if (n < 0.56) c = [0.22, 0.55, 0.26];
+    else if (n < 0.62) c = [0.75, 0.62, 0.35];
+    else c = [0.42, 0.4, 0.38];
+    return { p: [d[0] * Rr, d[1] * Rr, d[2] * Rr], n: d, c, e: 0 };
+  };
+  for (let i = 0; i < LAT; i++) for (let j = 0; j < LON; j++) {
+    mb.quad(vtx(i, j), vtx(i + 1, j), vtx(i + 1, j + 1), vtx(i, j + 1));
+  }
+  return [mb.out(0)];
 }

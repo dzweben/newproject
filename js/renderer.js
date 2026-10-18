@@ -69,9 +69,9 @@ void main() {
   }
 
   // Whole-scene breath: swells on bass and beats, and shimmers with the top end.
-  float pulse = 1.0 + uBreath * (0.10 * uBass + 0.08 * uBeat);
+  float pulse = 1.0 + uBreath * (0.22 * (uBass - 0.5) + 0.14 * uBeat);
   p *= pulse;
-  p += uBreath * uHigh * 0.018 * vec3(sin(t * 7.0 + sd * 40.0), cos(t * 6.1 + sd * 23.0), sin(t * 5.3 + sd * 11.0));
+  p += uBreath * max(0.0, uHigh - 0.4) * 0.05 * vec3(sin(t * 7.0 + sd * 40.0), cos(t * 6.1 + sd * 23.0), sin(t * 5.3 + sd * 11.0));
   vec4 vp = uView * vec4(p, 1.0);
   gl_Position = uProj * vp;
   float depth = max(0.1, -vp.z);
@@ -107,7 +107,7 @@ in vec3 aCol;
 in float aEmi;
 uniform mat4 uView;
 uniform mat4 uProj;
-uniform float uTime, uWave, uMode;
+uniform float uTime, uWave, uMode, uBass, uBeat, uMid, uSway, uBreath;
 out vec3 vPos;
 out vec3 vNrm;
 out vec3 vCol;
@@ -121,6 +121,14 @@ void main() {
     float dwdx = 0.45 * cos(a) + 0.125 * cos(c);
     float dwdz = 0.455 * cos(b) + 0.125 * cos(c);
     n = normalize(vec3(-uWave * dwdx, 1.0, -uWave * dwdz));
+  }
+  if (uMode > 8.5) {
+    // Line art breathes with the bass and beats, and sways with the mids.
+    float pulse = 1.0 + uBreath * (0.22 * (uBass - 0.5) + 0.14 * uBeat);
+    p *= pulse;
+    float sw = uSway * (0.03 + 0.10 * max(0.0, uMid - 0.3));
+    p.x += sw * sin(uTime * 1.7 + p.y * 3.0 + p.z * 1.3);
+    p.z += sw * cos(uTime * 1.3 + p.y * 2.2);
   }
   vPos = p;
   vNrm = n;
@@ -140,6 +148,13 @@ uniform vec3 uCam;
 out vec4 o;
 float h1(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
 void main() {
+  if (uMode > 8.5) {
+    // Line art glows additively and fades with distance.
+    float dl = length(vPos - uCam);
+    float fl = exp(-dl * uFog);
+    o = vec4(vCol * vEmi * fl * (0.9 + 0.8 * uBeat), 1.0);
+    return;
+  }
   vec3 n = normalize(vNrm);
   vec3 L = normalize(vec3(-0.45, 0.85, 0.3));
   float diff = max(dot(n, L), 0.0);
@@ -182,7 +197,7 @@ const ATTRIBS = { aPos: 3, aCol: 3, aSize: 1, aKind: 1, aAnchor: 3, aAxis: 3, aS
 const MATTRIBS = { aPos: 3, aNrm: 3, aCol: 3, aEmi: 1 };
 const MESH_KEYS = { aPos: 'pos', aNrm: 'nrm', aCol: 'col', aEmi: 'emi' };
 const PUNI = ['uView', 'uProj', 'uTime', 'uBass', 'uBeat', 'uSpin', 'uDiff', 'uPx', 'uDpr', 'uFog', 'uWave', 'uWrap', 'uSolid', 'uDensity', 'uMid', 'uHigh', 'uBreath'];
-const MUNI = ['uView', 'uProj', 'uTime', 'uWave', 'uMode', 'uFog', 'uCam', 'uBeat'];
+const MUNI = ['uView', 'uProj', 'uTime', 'uWave', 'uMode', 'uFog', 'uCam', 'uBeat', 'uBass', 'uMid', 'uSway', 'uBreath'];
 
 export function createRenderer(canvas) {
   const gl = canvas.getContext('webgl2', { antialias: false, alpha: false, premultipliedAlpha: false, powerPreference: 'high-performance' });
@@ -292,12 +307,26 @@ export function createRenderer(canvas) {
       gl.uniform1f(MU.uTime, f.time);
       gl.uniform1f(MU.uWave, f.wave);
       gl.uniform1f(MU.uBeat, f.beat);
+      gl.uniform1f(MU.uBass, f.bass);
+      gl.uniform1f(MU.uMid, f.mid);
+      gl.uniform1f(MU.uSway, f.sway || 0);
+      gl.uniform1f(MU.uBreath, f.breath);
       gl.uniform1f(MU.uFog, f.fog);
       gl.uniform3f(MU.uCam, f.cam[0], f.cam[1], f.cam[2]);
       for (const c of chunks) {
         gl.bindVertexArray(c.vao);
         gl.uniform1f(MU.uMode, c.mode);
-        gl.drawArrays(gl.TRIANGLES, 0, c.count);
+        if (c.mode > 8.5) {
+          // Line art is additive and writes no depth, so it glows over the geometry.
+          gl.enable(gl.BLEND);
+          gl.blendFunc(gl.ONE, gl.ONE);
+          gl.depthMask(false);
+          gl.drawArrays(gl.LINES, 0, c.count);
+          gl.disable(gl.BLEND);
+          gl.depthMask(true);
+        } else {
+          gl.drawArrays(gl.TRIANGLES, 0, c.count);
+        }
       }
       gl.bindVertexArray(null);
     }

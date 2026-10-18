@@ -36,7 +36,6 @@ html, body {
   margin: 0; font-size: 12px; font-weight: 600; letter-spacing: 0.28em;
   text-transform: uppercase; opacity: 0.9;
 }
-.top .sub { margin: 4px 0 0; color: var(--dim); font-size: 12px; letter-spacing: 0.02em; }
 
 
 .hint {
@@ -66,21 +65,6 @@ html, body {
   background: linear-gradient(90deg, var(--cyan), var(--gold));
   border-radius: 2px; box-shadow: 0 0 12px rgba(143, 220, 255, 0.55);
 }
-.tick {
-  position: absolute; top: 50%; width: 1px; height: 9px; margin-top: -4.5px;
-  background: rgba(255, 255, 255, 0.35); pointer-events: none;
-}
-.stages {
-  display: grid; grid-template-columns: repeat(11, minmax(0, 1fr)); gap: 4px;
-  margin: 0 0 14px; padding: 0; list-style: none;
-  color: var(--dim); font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase;
-}
-.stages li {
-  min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-  transition: color 0.6s ease;
-}
-.stages li.done { color: #aab4ca; }
-.stages li.on { color: var(--gold); }
 
 .row { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
 .now { flex: 1 1 180px; min-width: 0; }
@@ -107,7 +91,6 @@ button.on { border-color: var(--gold); color: var(--gold); }
 }
 
 @media (max-width: 720px) {
-  .stages { display: none; }
   .dock { padding-top: 26px; padding-bottom: calc(10px + env(safe-area-inset-bottom, 0px)); }
   .hint { top: calc(60px + env(safe-area-inset-top, 0px)); }
   .row { flex-wrap: wrap; gap: 12px; }
@@ -137,5 +120,5 @@ button.on { border-color: var(--gold); color: var(--gold); }
   button, .btn { -webkit-tap-highlight-color: transparent; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .stages li, #curtain { transition: none; }
+  #curtain { transition: none; }
 }

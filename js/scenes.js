@@ -3,7 +3,7 @@
 
 import { V, TAU, prng, sphere, gauss, clamp01, mix, fbm2, fbm3 } from './math.js';
 import { coastH, volcH, forestH, distToPath, lavaAt, VOLC_TOP, PATH, BLOCKS, CITY } from './terrain.js';
-import { oceanMesh, volcanoMesh, forestMesh, downtownMesh } from './meshes.js';
+import { oceanMesh, volcanoMesh, forestMesh, downtownMesh, earthMesh } from './meshes.js';
 
 const PHI = (1 + Math.sqrt(5)) / 2;
 
@@ -18,6 +18,11 @@ export class Builder {
     this.kind = new Float32Array(N);
     this.anchor = new Float32Array(N * 3);
     this.axis = new Float32Array(N * 3);
+    this.segs = [];
+  }
+  // Line segment between two points, drawn as glowing line art.
+  seg(a, c, col, e) {
+    this.segs.push({ a, b: c, c: col, e });
   }
   // Sets the orbit axis for the particle just added.
   setAxis(x, y, z) {
@@ -36,7 +41,7 @@ export class Builder {
   }
   finish() {
     for (let i = this.n; i < this.N; i++) this.size[i] = 0;
-    return { pos: this.pos, col: this.col, size: this.size, kind: this.kind, anchor: this.anchor, axis: this.axis };
+    return { pos: this.pos, col: this.col, size: this.size, kind: this.kind, anchor: this.anchor, axis: this.axis, segs: this.segs };
   }
 }
 
@@ -78,6 +83,17 @@ function buildAtoms(b, R) {
     b.add(c[0] + e1[0] * cs + e2[0] * sn, c[1] + e1[1] * cs + e2[1] * sn, c[2] + e1[2] * cs + e2[2] * sn, T[0], T[1], T[2], 0.9 + R() * 0.7, 9, c[0], c[1], c[2]);
     b.setAxis(nrm[0], nrm[1], nrm[2]);
   }
+  // Electron shells, drawn as rings in each shell's plane.
+  for (let a = 0; a < A; a++) for (let sh = 0; sh < 3; sh++) {
+    const [e1, e2] = bases[a][sh], c = centers[a], rr = RAD[sh], T = TINT[sh];
+    let prev = null;
+    for (let j = 0; j <= 48; j++) {
+      const th = (j / 48) * TAU, cs = Math.cos(th) * rr, sn = Math.sin(th) * rr;
+      const p = [c[0] + e1[0] * cs + e2[0] * sn, c[1] + e1[1] * cs + e2[1] * sn, c[2] + e1[2] * cs + e2[2] * sn];
+      if (prev) b.seg(prev, p, [T[0], T[1], T[2]], 1.2);
+      prev = p;
+    }
+  }
   return b;
 }
 
@@ -109,6 +125,10 @@ function buildShapes(b, R) {
     const C = isA ? [1, 0.82, 0.42] : [0.45, 0.9, 1];
     b.add(p[0] + gauss(R) * 0.006, p[1] + gauss(R) * 0.006, p[2] + gauss(R) * 0.006, C[0], C[1], C[2], 0.9 + R() * 0.5);
   }
+  // Wireframe polyhedra: the icosahedron in amber, the dodecahedron in cyan.
+  for (const [S, col] of [[A, [1, 0.82, 0.42]], [B, [0.45, 0.9, 1]]]) {
+    for (const e of S.E) b.seg(S.Vs[e[0]], S.Vs[e[1]], col, 1.6);
+  }
   return b;
 }
 
@@ -125,6 +145,16 @@ function buildGalaxies(b, R) {
     let c = [0.95 - 0.45 * t, 0.9 - 0.25 * t, 1.0];
     if (R() < 0.07) c = [1, 0.42, 0.62];
     b.add(r * Math.cos(th), gauss(R) * 0.018 * (1.1 - r * 0.6), r * Math.sin(th), c[0], c[1], c[2], 0.8 + R() * 0.9);
+  }
+  // Spiral arms traced as curves.
+  for (let arm = 0; arm < 3; arm++) {
+    let prev = null;
+    for (let j = 0; j <= 90; j++) {
+      const r = 0.1 + 1.15 * Math.pow(j / 90, 0.85), th = arm * TAU / 3 + 3.0 * Math.log(1 + r * 5);
+      const p = [r * Math.cos(th), 0, r * Math.sin(th)];
+      if (prev) b.seg(prev, p, [0.7, 0.8, 1], 0.9);
+      prev = p;
+    }
   }
   return b;
 }
@@ -151,6 +181,8 @@ function buildUniverse(b, R) {
       b.add(p[0] + d[0] * q, p[1] + d[1] * q, p[2] + d[2] * q, 1, 0.93, 0.98, 1.0 + R() * 0.9);
     }
   }
+  // Filaments: each halo joins its three nearest neighbours.
+  for (let h = 0; h < H; h++) for (const n of nb[h]) b.seg(hc[h], hc[n], [0.4, 0.55, 1], 1.0);
   return b;
 }
 
@@ -179,6 +211,29 @@ function buildLife(b, R) {
       b.add(cell.c[0] + d[0] * q, cell.c[1] + d[1] * q, cell.c[2] + d[2] * q, 0.92, 0.85, 0.35, 1.0, 10);
     }
   }
+  // Membranes: latitude rings and meridians around each cell.
+  for (const cell of cells) {
+    for (let i = 1; i < 4; i++) {
+      const ph = (i / 4) * Math.PI, y = Math.cos(ph) * cell.r, rr = Math.sin(ph) * cell.r;
+      let prev = null;
+      for (let j = 0; j <= 32; j++) {
+        const th = (j / 32) * TAU;
+        const p = [cell.c[0] + Math.cos(th) * rr, cell.c[1] + y, cell.c[2] + Math.sin(th) * rr];
+        if (prev) b.seg(prev, p, [0.4, 0.95, 0.9], 1.1);
+        prev = p;
+      }
+    }
+    for (let m = 0; m < 4; m++) {
+      const th = (m / 4) * Math.PI;
+      let prev = null;
+      for (let j = 0; j <= 32; j++) {
+        const ph = (j / 32) * Math.PI;
+        const p = [cell.c[0] + Math.sin(ph) * Math.cos(th) * cell.r, cell.c[1] + Math.cos(ph) * cell.r, cell.c[2] + Math.sin(ph) * Math.sin(th) * cell.r];
+        if (prev) b.seg(prev, p, [0.4, 0.95, 0.9], 1.1);
+        prev = p;
+      }
+    }
+  }
   return b;
 }
 
@@ -204,6 +259,19 @@ function buildCreatures(b, R) {
     } else {
       const phi = R() * TAU, s = R(), rr = jf.r * 0.92;
       b.add(c[0] + Math.cos(phi) * rr, c[1] - s * jf.L, c[2] + Math.sin(phi) * rr, 0.8, 0.95, 1.0, 0.95, 7, c[0], c[1], c[2]);
+    }
+  }
+  // Tentacles hang from each bell's rim and curl as they fall.
+  for (const jf of jel) {
+    for (let j = 0; j < 14; j++) {
+      const phi = (j / 14) * TAU, rr = jf.r * 0.92;
+      let prev = [jf.c[0] + Math.cos(phi) * rr, jf.c[1], jf.c[2] + Math.sin(phi) * rr];
+      for (let st = 1; st <= 6; st++) {
+        const q = st / 6;
+        const p = [jf.c[0] + Math.cos(phi) * rr + Math.sin(st * 1.3 + phi) * 0.12 * q, jf.c[1] - jf.L * q, jf.c[2] + Math.sin(phi) * rr + Math.cos(st * 1.1 + phi) * 0.12 * q];
+        b.seg(prev, p, [0.6, 0.9, 1], 1.0);
+        prev = p;
+      }
     }
   }
   return b;
@@ -327,12 +395,12 @@ export const SCENES = [
   },
   {
     name: 'Creatures', short: 'Creatures', line: 'Jellyfish pulse through a sea that was here first.', weight: 1,
-    px: 3.8, fog: 0.05, kick: true, spin: 0, wave: 0, wrap: 0, solid: false, build: buildCreatures,
+    px: 3.8, fog: 0.05, kick: true, sway: 1, spin: 0, wave: 0, wrap: 0, solid: false, build: buildCreatures,
     cam: (t, u) => orbit(t, [0, 0.6, 0], 9.0 - 1.0 * u, 0.12, 0.05, 0.5, 55),
   },
   {
     name: 'Earth', short: 'Earth', line: 'One small planet, and the place everything happens.', weight: 1,
-    px: 3.4, fog: 0, kick: true, spin: 0, wave: 0, wrap: 0, solid: false, build: buildEarth,
+    px: 3.4, fog: 0, kick: true, spin: 0, wave: 0, wrap: 0, solid: false, build: buildEarth, mesh: earthMesh, noBreath: true,
     cam: (t, u) => orbit(t, [0, 0, 0], 5.6 - 3.0 * u, 0.1 + 0.2 * u, 0.02, 0, 42),
   },
   {

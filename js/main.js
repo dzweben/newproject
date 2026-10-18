@@ -2,6 +2,7 @@
 
 import { createRenderer } from './renderer.js';
 import { SCENES, STARTS, TOTAL, sceneAt, buildScene, buildMesh, cameraFor } from './scenes.js';
+import { lineChunk } from './meshes.js';
 import { lookAt, perspective, clamp01 } from './math.js';
 import { COARSE, SMALL } from './device.js';
 
@@ -55,19 +56,7 @@ function main() {
   /* ----- DOM ----- */
   const hint = $('#hint'), nowEl = $('#now'), creditEl = $('#credit');
   const fillEl = $('#fill'), meterEl = $('#meter');
-  const toggleBtn = $('#toggle'), stageList = $('#stages'), tracksEl = $('#tracks'), fileInput = $('#file');
-
-  SCENES.forEach((s) => {
-    const li = document.createElement('li');
-    li.textContent = s.short;
-    stageList.appendChild(li);
-  });
-  STARTS.forEach((s) => {
-    const tick = document.createElement('span');
-    tick.className = 'tick';
-    tick.style.left = (s / TOTAL * 100) + '%';
-    meterEl.appendChild(tick);
-  });
+  const toggleBtn = $('#toggle'), tracksEl = $('#tracks'), fileInput = $('#file');
 
   /* ----- audio ----- */
   const audio = new Audio();
@@ -180,12 +169,6 @@ function main() {
     progress = STARTS[k] + (hm[2] ? clamp01(+hm[2]) : 0.5) * SCENES[k].weight;
   }
 
-  function markStage(k) {
-    [...stageList.children].forEach((li, i) => {
-      li.classList.toggle('on', i === k);
-      li.classList.toggle('done', i < k);
-    });
-  }
   function setScene(k) {
     const first = sceneIdx < 0;
     sceneIdx = k;
@@ -193,43 +176,48 @@ function main() {
     tgt.set(T.pos); tcol.set(T.col);
     size.set(T.size); kind.set(T.kind); anchor.set(T.anchor); axis.set(T.axis);
     R.upload('aSize'); R.upload('aKind'); R.upload('aAnchor'); R.upload('aAxis');
-    R.setMesh(buildMesh(k));
+    const chunks = buildMesh(k) || [];
+    if (T.segs.length) chunks.push(lineChunk(T.segs));
+    R.setMesh(chunks);
     diffTarget = SCENES[k].spin;
     // A change of scene bursts outward and flashes, so the transition is felt rather than announced.
     if (!first) { kick(1.2); beat = 1; }
-    markStage(k);
   }
 
-  /* ----- analysis ----- */
+  /* ----- analysis -----
+     Each band is compared with its own recent level, so a hit reads as a rise and a lull as a fall. */
+  let slowB = 0, slowM = 0, slowH = 0, lastOnset = -9;
   function analyse(dt, t, playing) {
-    let b = 0, m = 0, h = 0, target = 0;
+    let b = 0, m = 0, h = 0, loud = 0;
     if (playing && analyser) {
       analyser.getByteFrequencyData(freq);
-      const avg = (a, z) => { let s = 0; for (let i = a; i < z; i++) s += freq[i]; return s / ((z - a) * 255); };
+      const avg = (a, z) => { let s = 0; for (let i = a; i < z; i++) s += freq[i] * freq[i]; return s / ((z - a) * 255 * 255); };
       b = avg(1, 7); m = avg(7, 40); h = avg(40, 200);
       analyser.getFloatTimeDomainData(wave);
       let sum = 0;
       for (let i = 0; i < wave.length; i++) sum += wave[i] * wave[i];
       const db = 10 * Math.log10(Math.max(sum / wave.length, 1e-12));
-      target = clamp01((db + 44) / 22);
+      loud = clamp01((db + 44) / 22);
     }
-    // Visual bands use automatic gain, so quiet and loud recordings both fill the range.
-    const dec = Math.exp(-dt * 0.05);
-    pkB = Math.max(b, pkB * dec); pkM = Math.max(m, pkM * dec); pkH = Math.max(h, pkH * dec);
-    b = Math.min(1, b / Math.max(pkB, 0.15));
-    m = Math.min(1, m / Math.max(pkM, 0.15));
-    h = Math.min(1, h / Math.max(pkH, 0.15));
-    const k = Math.min(1, dt * 14);
-    bass += (b - bass) * k; mid += (m - mid) * k; high += (h - high) * k;
-    energy += (target - energy) * Math.min(1, dt * 1.2);
-    bassAvg += (bass - bassAvg) * Math.min(1, dt * 2);
+    // Slow memory of each band, about a second long.
+    const kSlow = 1 - Math.exp(-dt * 1.2);
+    const onsetB = (b - slowB) / (slowB + 0.01);
+    slowB += (b - slowB) * kSlow; slowM += (m - slowM) * kSlow; slowH += (h - slowH) * kSlow;
+    const rel = (x, s) => clamp01(0.5 + ((x - s) / (s + 0.02)) * 0.6);
+    const vB = rel(b, slowB), vM = rel(m, slowM), vH = rel(h, slowH);
+    // Fast attack and slower release, so visuals hit on transients and settle after.
+    const kA = 1 - Math.exp(-dt * 18), kR = 1 - Math.exp(-dt * 5);
+    bass += (vB - bass) * (vB > bass ? kA : kR);
+    mid += (vM - mid) * (vM > mid ? kA : kR);
+    high += (vH - high) * (vH > high ? kA : kR);
+    energy += (loud - energy) * Math.min(1, dt * 1.2);
     let fired = 0;
-    if (playing && bass > bassAvg * 1.3 + 0.06 && t - lastBeat > 0.22) {
-      lastBeat = t;
+    if (playing && onsetB > 0.5 && t - lastOnset > 0.22) {
+      lastOnset = t;
       beat = 1;
-      fired = Math.min(1, (bass - bassAvg) * 3);
+      fired = Math.min(1, onsetB * 0.5);
     }
-    beat = Math.max(0, beat - dt * 3.5);
+    beat = Math.max(0, beat - dt * 4.5);
     return fired;
   }
 
@@ -321,7 +309,7 @@ function main() {
       time: clock, bass, mid, high, beat, spin, diff: diffCur, density,
       px: sc.px, dpr: dpr(), fog: sc.fog,
       wave: sc.wave * (0.5 + 1.8 * bass + 0.5 * beat), wrap: sc.wrap,
-      breath: sc.kick ? 1 : 0.25,
+      breath: sc.noBreath ? 0 : (sc.kick ? 1 : 0.25), sway: sc.sway || 0,
       solid: sc.solid, n: N, cam: camEye,
     });
     requestAnimationFrame(frame);
