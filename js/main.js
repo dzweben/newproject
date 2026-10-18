@@ -3,6 +3,7 @@
 import { createRenderer } from './renderer.js';
 import { SCENES, STARTS, TOTAL, sceneAt, buildScene, buildMesh, cameraFor } from './scenes.js';
 import { lookAt, perspective, clamp01 } from './math.js';
+import { COARSE, SMALL } from './device.js';
 
 const TRACKS = [
   { short: 'Moonlight', title: 'Beethoven: Moonlight Sonata', src: 'assets/music/moonlight-sonata.mp3', credit: 'Public domain. Internet Archive.' },
@@ -27,8 +28,7 @@ function showError(text) {
 
 function main() {
   const params = new URLSearchParams(location.search);
-  const small = matchMedia('(max-width: 700px)').matches || (navigator.hardwareConcurrency || 8) <= 4;
-  const N = Math.max(4000, Math.min(200000, Number(params.get('n')) || (small ? 60000 : 180000)));
+  const N = Math.max(4000, Math.min(200000, Number(params.get('n')) || (SMALL ? 45000 : 150000)));
 
   const canvas = $('#scene');
   let R;
@@ -74,6 +74,8 @@ function main() {
   let ac = null, analyser = null, freq = null, wave = null, audioReady = false;
   function initAudio() {
     if (audioReady) return true;
+    // iOS Safari mutes Web Audio on the silent switch unless the session is set to playback.
+    try { if (navigator.audioSession) navigator.audioSession.type = 'playback'; } catch (e) { /* not supported */ }
     const AC = window.AudioContext || window.webkitAudioContext;
     if (!AC) return false;
     ac = new AC();
@@ -123,7 +125,7 @@ function main() {
     b.type = 'button';
     b.textContent = tr.short;
     b.addEventListener('click', () => loadTrack(tr, b));
-    tracksEl.appendChild(b);
+    tracksEl.insertBefore(b, tracksEl.querySelector('.btn'));
   });
   fileInput.addEventListener('change', () => {
     const f = fileInput.files[0];
@@ -147,10 +149,16 @@ function main() {
       progress = audio.currentTime / audio.duration * TOTAL;
     }
   });
-  meterEl.addEventListener('click', (e) => {
+  let scrubbing = false;
+  const scrubTo = (e) => {
     const r = meterEl.getBoundingClientRect();
     seekFraction((e.clientX - r.left) / r.width);
-  });
+  };
+  meterEl.addEventListener('pointerdown', (e) => { scrubbing = true; meterEl.setPointerCapture(e.pointerId); scrubTo(e); });
+  meterEl.addEventListener('pointermove', (e) => { if (scrubbing) scrubTo(e); });
+  const stopScrub = () => { scrubbing = false; };
+  meterEl.addEventListener('pointerup', stopScrub);
+  meterEl.addEventListener('pointercancel', stopScrub);
   toggleBtn.addEventListener('click', togglePlay);
   audio.addEventListener('play', syncToggle);
   audio.addEventListener('pause', syncToggle);
@@ -250,10 +258,13 @@ function main() {
   let fovCur = 50, camInit = false;
 
   /* ----- frame loop ----- */
-  const dpr = () => Math.min(2, window.devicePixelRatio || 1);
+  const dpr = () => Math.min(SMALL ? 1.5 : 2, window.devicePixelRatio || 1);
+  // Phones pack about three times as many particles into each pixel, so points shrink to keep the image from washing out.
+  let density = 1;
   function resize() {
     const d = dpr();
     R.resize(Math.round(innerWidth * d), Math.round(innerHeight * d));
+    density = Math.min(1, Math.max(0.5, Math.sqrt(innerWidth * innerHeight / (1280 * 720))));
   }
   window.addEventListener('resize', resize);
   resize();
@@ -313,7 +324,7 @@ function main() {
     R.draw({
       view: lookAt(camEye, camTgt),
       proj: perspective(fovY, aspect, 0.08, 400),
-      time: t, bass, beat, spin, diff: diffCur,
+      time: t, bass, beat, spin, diff: diffCur, density,
       px: sc.px, dpr: dpr(), fog: sc.fog,
       wave: sc.wave * (1 + bass * 0.5), wrap: sc.wrap,
       solid: sc.solid, n: N, cam: camEye,
@@ -329,6 +340,7 @@ function main() {
 
   window.atomsDebug = () => ({ progress: +progress.toFixed(3), scene: sceneIdx, energy: +energy.toFixed(3), bass: +bass.toFixed(3), playing: !audio.paused });
 
+  if (COARSE) $('#hint').textContent = 'Pick a track below, or choose an MP3 from your phone.';
   setScene(sceneAt(progress));
   requestAnimationFrame(() => requestAnimationFrame(() => document.body.classList.add('ready')));
   requestAnimationFrame(frame);

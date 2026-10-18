@@ -108,7 +108,7 @@ html, body {
 .now { flex: 1 1 180px; min-width: 0; }
 #now { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 500; }
 #credit { display: block; color: var(--dim); font-size: 12px; }
-.tracks { display: flex; flex-wrap: wrap; gap: 8px; }
+.tracks { display: flex; flex-wrap: wrap; gap: 8px; min-width: 0; }
 
 button, .btn {
   font: inherit; color: var(--ink); background: var(--glass);
@@ -130,8 +130,36 @@ button.on { border-color: var(--gold); color: var(--gold); }
 
 @media (max-width: 720px) {
   .stages { display: none; }
-  .dock { padding-top: 26px; }
-  .caption { top: 12%; }
+  .dock { padding-top: 26px; padding-bottom: calc(10px + env(safe-area-inset-bottom, 0px)); }
+  .caption { top: 21%; }
+  .hint { top: calc(60px + env(safe-area-inset-top, 0px)); }
+  .row { flex-wrap: wrap; gap: 12px; }
+  .now { flex: 1 1 0; }
+  /* Chips sit on one scrolling line instead of wrapping into a tall stack. */
+  .tracks {
+    flex: 0 0 calc(100% + 36px); margin: 0 -18px; box-sizing: border-box;
+    flex-wrap: nowrap; overflow-x: auto; -webkit-overflow-scrolling: touch;
+    scrollbar-width: none; padding: 2px 18px 4px; scroll-padding: 0 18px;
+  }
+  .tracks::-webkit-scrollbar { display: none; }
+  .tracks > * { flex: 0 0 auto; white-space: nowrap; }
+  .tracks button, .tracks .btn { min-height: 44px; display: inline-flex; align-items: center; }
+  .meter { height: 28px; touch-action: none; }
+  .round { width: 48px; height: 48px; }
+}
+/* Landscape phones: keep the bar slim so the scene stays in view. */
+@media (max-height: 520px) and (orientation: landscape) {
+  .dock { padding-top: 16px; padding-bottom: calc(8px + env(safe-area-inset-bottom, 0px)); }
+  .meter { height: 22px; margin-bottom: 6px; }
+  .now small, .caption .line { display: none; }
+  .caption { top: 9%; }
+  .caption .name { font-size: clamp(30px, 6vw, 56px); }
+  .hint { top: calc(50px + env(safe-area-inset-top, 0px)); }
+  .round { width: 40px; height: 40px; }
+}
+@media (pointer: coarse) {
+  .meter { touch-action: none; }
+  button, .btn { -webkit-tap-highlight-color: transparent; }
 }
 @media (prefers-reduced-motion: reduce) {
   .caption, .stages li, #curtain { transition: none; }

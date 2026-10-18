@@ -4,6 +4,7 @@
 
 import { V, mix, clamp01, prng, fbm2 } from './math.js';
 import { coastH, volcH, forestH, distToPath, lavaAt, BLOCKS, CITY } from './terrain.js';
+import { SMALL, grid } from './device.js';
 
 class MB {
   constructor() { this.p = []; this.n = []; this.c = []; this.e = []; }
@@ -52,7 +53,7 @@ function box(mb, x0, x1, y0, y1, z0, z1, wall, roof) {
 
 export function oceanMesh() {
   const land = new MB();
-  heightfield(land, 14, 170,
+  heightfield(land, 14, grid(170),
     (x, z) => Math.max(Math.min(coastH(x, z), 6), -2.2),
     (x, z, h) => {
       if (h > 0.02) {
@@ -65,7 +66,7 @@ export function oceanMesh() {
       return [mix(0.05, 0.02, d), mix(0.14, 0.1, d), mix(0.22, 0.3, d)];
     });
   const water = new MB();
-  heightfield(water, 14, 120, () => 0, (x, z) => {
+  heightfield(water, 14, grid(120), () => 0, (x, z) => {
     const d = clamp01(-coastH(x, z) / 3);
     return [mix(0.1, 0.01, d), mix(0.4, 0.07, d), mix(0.5, 0.18, d)];
   });
@@ -74,7 +75,7 @@ export function oceanMesh() {
 
 export function volcanoMesh() {
   const mb = new MB();
-  heightfield(mb, 16, 200, volcH, (x, z, h) => {
+  heightfield(mb, 16, grid(200), volcH, (x, z, h) => {
     const r = Math.hypot(x, z);
     if (h > 4) return [0.22, 0.19, 0.19];
     if (r < 3) return [0.3, 0.27, 0.27];
@@ -116,14 +117,15 @@ function canopy(mb, cx, cy, cz, rad, R, base) {
 
 export function forestMesh() {
   const ground = new MB();
-  heightfield(ground, 14, 150, forestH, (x, z) => {
+  heightfield(ground, 14, grid(150), forestH, (x, z) => {
     const n = fbm2(x * 0.5, z * 0.5, 33, 2);
     return [mix(0.18, 0.34, n), mix(0.34, 0.28, n), mix(0.14, 0.15, n)];
   });
   const trees = new MB();
   const R = prng(4242);
   let count = 0;
-  while (count < 420) {
+  const TREES = SMALL ? 260 : 420;
+  while (count < TREES) {
     const x = (R() * 2 - 1) * 13, z = (R() * 2 - 1) * 13, dp = distToPath(x, z);
     if (dp < 1.8 || R() > 1 / (1 + (dp / 3) ** 2)) continue;
     count++;

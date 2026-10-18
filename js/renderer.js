@@ -12,7 +12,7 @@ in vec3 aAnchor;
 in float aSeed;
 uniform mat4 uView;
 uniform mat4 uProj;
-uniform float uTime, uBass, uBeat, uSpin, uDiff, uPx, uDpr, uFog, uWave, uWrap;
+uniform float uTime, uBass, uBeat, uSpin, uDiff, uPx, uDpr, uFog, uWave, uWrap, uDensity;
 out vec3 vCol;
 out float vA;
 void main() {
@@ -63,8 +63,8 @@ void main() {
   gl_Position = uProj * vp;
   float depth = max(0.1, -vp.z);
   float fog = exp(-depth * uFog);
-  gl_PointSize = min(48.0, aSize * uPx * uDpr * clamp(4.0 / depth, 0.2, 12.0));
-  vec3 c = aCol * (0.85 + 0.3 * uBeat + 0.15 * uBass);
+  gl_PointSize = min(48.0, aSize * uPx * uDpr * uDensity * clamp(4.0 / depth, 0.2, 12.0));
+  vec3 c = aCol * (0.85 + 0.3 * uBeat + 0.15 * uBass) * mix(0.7, 1.0, uDensity);
   if (k == 8) c *= 0.7 + 0.45 * sin(t * 2.0 + sd * 40.0);
   vCol = c * fog;
   vA = alpha;
@@ -168,7 +168,7 @@ void main() {
 const ATTRIBS = { aPos: 3, aCol: 3, aSize: 1, aKind: 1, aAnchor: 3, aSeed: 1 };
 const MATTRIBS = { aPos: 3, aNrm: 3, aCol: 3, aEmi: 1 };
 const MESH_KEYS = { aPos: 'pos', aNrm: 'nrm', aCol: 'col', aEmi: 'emi' };
-const PUNI = ['uView', 'uProj', 'uTime', 'uBass', 'uBeat', 'uSpin', 'uDiff', 'uPx', 'uDpr', 'uFog', 'uWave', 'uWrap', 'uSolid'];
+const PUNI = ['uView', 'uProj', 'uTime', 'uBass', 'uBeat', 'uSpin', 'uDiff', 'uPx', 'uDpr', 'uFog', 'uWave', 'uWrap', 'uSolid', 'uDensity'];
 const MUNI = ['uView', 'uProj', 'uTime', 'uWave', 'uMode', 'uFog', 'uCam'];
 
 export function createRenderer(canvas) {
@@ -302,6 +302,7 @@ export function createRenderer(canvas) {
     gl.uniform1f(PU.uFog, f.fog);
     gl.uniform1f(PU.uWave, 0);
     gl.uniform1f(PU.uWrap, f.wrap);
+    gl.uniform1f(PU.uDensity, f.density);
     gl.uniform1f(PU.uSolid, f.solid ? 1 : 0);
 
     if (f.solid) {
